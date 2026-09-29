@@ -1,0 +1,71 @@
+#!/bin/bash
+# Installs Terraform, Ansible, Docker, kubectl and eksctl on Ubuntu (22.04 / 24.04, x86_64 or arm64)
+# Usage: sudo bash install-devops-tools.sh
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run as root: sudo bash $0"
+  exit 1
+fi
+
+# Login user to add to the docker group (works with sudo, and with EC2 user data as ubuntu)
+TARGET_USER="${SUDO_USER:-ubuntu}"
+
+# CPU architecture mapping
+case "$(uname -m)" in
+  x86_64)  ARCH="amd64" ;;
+  aarch64) ARCH="arm64" ;;
+  *) echo "Unsupported architecture: $(uname -m)"; exit 1 ;;
+esac
+
+. /etc/os-release
+CODENAME="${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+
+echo "==> Base packages"
+apt-get update -y
+apt-get install -y ca-certificates curl gnupg lsb-release software-properties-common unzip tar wget
+install -m 0755 -d /etc/apt/keyrings
+
+echo "==> Terraform"
+curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [arch=${ARCH} signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${CODENAME} main" \
+  > /etc/apt/sources.list.d/hashicorp.list
+apt-get update -y
+apt-get install -y terraform
+
+echo "==> Ansible"
+add-apt-repository --yes --update ppa:ansible/ansible
+apt-get install -y ansible
+
+echo "==> Docker"
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
+  > /etc/apt/sources.list.d/docker.list
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+systemctl enable --now docker
+if id "$TARGET_USER" >/dev/null 2>&1; then
+  usermod -aG docker "$TARGET_USER"
+fi
+
+echo "==> kubectl (latest stable)"
+KUBECTL_VERSION="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl"
+chmod +x /usr/local/bin/kubectl
+
+echo "==> eksctl (latest release)"
+curl -fsSL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_${ARCH}.tar.gz" | tar xz -C /tmp
+mv /tmp/eksctl /usr/local/bin/eksctl
+chmod +x /usr/local/bin/eksctl
+
+echo
+echo "==> Installed versions"
+terraform -version | head -n 1
+ansible --version | head -n 1
+docker --version
+kubectl version --client
+eksctl version
+echo
+echo "Done. Log out and back in (or run 'newgrp docker') so ${TARGET_USER} can use docker without sudo."
