@@ -10,7 +10,7 @@ NEXUS_VERSION="3.70.4-02"
 
 # 1. Java 17 + tools
 apt-get update -y
-apt-get install -y openjdk-17-jdk wget curl tar
+apt-get install -y openjdk-11-jdk wget curl tar
 
 # 2. Download and unpack
 cd /tmp

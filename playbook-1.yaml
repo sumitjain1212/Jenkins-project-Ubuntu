@@ -1,0 +1,31 @@
+---
+- name: Install Docker, Git, Maven
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Install Docker
+      yum:
+        name: docker
+        state: present
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install Git
+      yum:
+        name: git
+        state: present
+
+    - name: Install Maven
+      yum:
+        name: maven
+        state: present
+        
+    - name: Set Docker socket permissions
+      file:
+        path: /var/run/docker.sock
+        mode: '0777'
