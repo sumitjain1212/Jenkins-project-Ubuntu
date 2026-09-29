@@ -4,9 +4,20 @@
   become: yes
   tasks:
 
+    - name: Install prerequisites
+      apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - software-properties-common
+
     - name: Install Docker
-      yum:
-        name: docker
+      apt:
+        name: docker.io
         state: present
 
     - name: Start Docker service
@@ -16,15 +27,15 @@
         enabled: yes
 
     - name: Install Git
-      yum:
+      apt:
         name: git
         state: present
 
     - name: Install Maven
-      yum:
+      apt:
         name: maven
         state: present
-        
+
     - name: Set Docker socket permissions
       file:
         path: /var/run/docker.sock
