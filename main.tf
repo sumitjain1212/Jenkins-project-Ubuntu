@@ -32,7 +32,33 @@ variable "key_name" {
   default = "Login"
 }
 
-# Local path to the Login.pem private key (used so Terraform can SSH in and wait for installs)
+# Instance types. Defaults are Free Tier eligible for accounts created on/after 15 Jul 2025.
+# Check yours with:
+#   aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true \
+#     --query "InstanceTypes[*].[InstanceType]" --output text | sort
+variable "sonarqube_instance_type" {
+  type    = string
+  default = "c7i-flex.large" # 2 vCPU / 4 GB RAM (SonarQube needs 4 GB+)
+}
+
+variable "nexus_instance_type" {
+  type    = string
+  default = "c7i-flex.large" # 2 vCPU / 4 GB RAM
+}
+
+variable "test_instance_type" {
+  type    = string
+  default = "t3.small"
+}
+
+# Optional: let Terraform SSH in and wait until each install finishes.
+# Needs the runner (e.g. Jenkins) to be allowed on port 22 and to have the .pem file.
+variable "wait_for_install" {
+  type    = bool
+  default = false
+}
+
+# Path to Login.pem on the machine running Terraform (only read when wait_for_install = true)
 variable "private_key_path" {
   type    = string
   default = "Login.pem"
@@ -152,7 +178,7 @@ resource "aws_security_group" "test" {
 ############################
 resource "aws_instance" "sonarqube" {
   ami                         = var.ami_id
-  instance_type               = "t3.micro" # SonarQube needs 4 GB+ RAM
+  instance_type               = var.sonarqube_instance_type
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.sonarqube.id]
   associate_public_ip_address = true
@@ -164,30 +190,12 @@ resource "aws_instance" "sonarqube" {
     volume_type = "gp3"
   }
 
-  connection {
-    type        = "ssh"
-    host        = self.public_ip
-    user        = "ubuntu"
-    private_key = file(var.private_key_path)
-    timeout     = "10m"
-  }
-
-  # Block terraform apply until the SonarQube install (user_data) has finished
-  provisioner "remote-exec" {
-    inline = [
-      "echo 'Waiting for SonarQube installation to finish...'",
-      "sudo cloud-init status --wait",
-      "curl -s http://127.0.0.1:9000/api/system/status",
-      "echo 'SonarQube install complete'",
-    ]
-  }
-
   tags = { Name = "SonarQubeServer" }
 }
 
 resource "aws_instance" "nexus" {
   ami                         = var.ami_id
-  instance_type               = "t3.micro" # Nexus needs ~4 GB RAM
+  instance_type               = var.nexus_instance_type
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.nexus.id]
   associate_public_ip_address = true
@@ -199,30 +207,12 @@ resource "aws_instance" "nexus" {
     volume_type = "gp3"
   }
 
-  connection {
-    type        = "ssh"
-    host        = self.public_ip
-    user        = "ubuntu"
-    private_key = file(var.private_key_path)
-    timeout     = "10m"
-  }
-
-  # Block terraform apply until the Nexus install (user_data) has finished
-  provisioner "remote-exec" {
-    inline = [
-      "echo 'Waiting for Nexus installation to finish...'",
-      "sudo cloud-init status --wait",
-      "curl -s -o /dev/null -w 'Nexus HTTP status: %%{http_code}\\n' http://127.0.0.1:8081/",
-      "echo 'Nexus install complete'",
-    ]
-  }
-
   tags = { Name = "NexusServer" }
 }
 
 resource "aws_instance" "test" {
   ami                         = var.ami_id
-  instance_type               = "t3.small"
+  instance_type               = var.test_instance_type
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.test.id]
   associate_public_ip_address = true
@@ -234,9 +224,56 @@ resource "aws_instance" "test" {
     volume_type = "gp3"
   }
 
+  tags = { Name = "TestServer" }
+}
+
+############################
+# Optional: wait for installs to finish (only when wait_for_install = true)
+############################
+resource "terraform_data" "wait_sonarqube" {
+  count = var.wait_for_install ? 1 : 0
+
   connection {
     type        = "ssh"
-    host        = self.public_ip
+    host        = aws_instance.sonarqube.public_ip
+    user        = "ubuntu"
+    private_key = file(var.private_key_path)
+    timeout     = "10m"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo cloud-init status --wait",
+      "curl -s http://127.0.0.1:9000/api/system/status",
+    ]
+  }
+}
+
+resource "terraform_data" "wait_nexus" {
+  count = var.wait_for_install ? 1 : 0
+
+  connection {
+    type        = "ssh"
+    host        = aws_instance.nexus.public_ip
+    user        = "ubuntu"
+    private_key = file(var.private_key_path)
+    timeout     = "10m"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo cloud-init status --wait",
+      "curl -s -o /dev/null -w 'Nexus HTTP status: %%{http_code}\\n' http://127.0.0.1:8081/",
+    ]
+  }
+}
+
+resource "terraform_data" "wait_test" {
+  count = var.wait_for_install ? 1 : 0
+
+  connection {
+    type        = "ssh"
+    host        = aws_instance.test.public_ip
     user        = "ubuntu"
     private_key = file(var.private_key_path)
     timeout     = "10m"
@@ -248,8 +285,6 @@ resource "aws_instance" "test" {
       "terraform -version",
     ]
   }
-
-  tags = { Name = "TestServer" }
 }
 
 ############################
