@@ -152,7 +152,7 @@ resource "aws_security_group" "test" {
 ############################
 resource "aws_instance" "sonarqube" {
   ami                         = var.ami_id
-  instance_type               = "t3.medium" # SonarQube needs 4 GB+ RAM
+  instance_type               = "t3.micro" # SonarQube needs 4 GB+ RAM
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.sonarqube.id]
   associate_public_ip_address = true
@@ -187,7 +187,7 @@ resource "aws_instance" "sonarqube" {
 
 resource "aws_instance" "nexus" {
   ami                         = var.ami_id
-  instance_type               = "t3.medium" # Nexus needs ~4 GB RAM
+  instance_type               = "t3.micro" # Nexus needs ~4 GB RAM
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.nexus.id]
   associate_public_ip_address = true
