@@ -35,7 +35,7 @@ variable "key_name" {
 # Local path to the Login.pem private key (used so Terraform can SSH in and wait for installs)
 variable "private_key_path" {
   type    = string
-  default = "${path.module}/Login.pem"
+  default = "Login.pem"
 }
 
 # Restrict this to your own IP, e.g. "203.0.113.10/32"
