@@ -1,0 +1,110 @@
+
+pipeline {
+    agent any
+    environment {
+        cred = credentials('aws-key')
+    }
+    tools {
+        maven 'maven'
+    }
+    stages {
+      stage('checkout'){
+            steps{
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/sumitjain1212/Jenkins-project-Ubuntu.git']])
+            }
+        }
+      stage('Code Compile') {
+            steps {
+                sh "mvn -B clean compile"
+            }
+        }
+      stage('SonarQube Analysis') {
+            steps {
+                script {
+                    def mvnHome = tool 'maven'
+                    withSonarQubeEnv('sonarqube') {
+                        sh "${mvnHome}/bin/mvn clean verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                          -Dsonar.projectKey=addressbook \
+                          -Dsonar.projectName=addressbook"
+                    }
+                }
+            }
+        }
+      stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+      stage('Approval') {
+        steps {
+            input message: 'Approval required to proceed',
+            id: 'approve',
+            submitter: 'admin'
+       }
+     }
+      stage('Build the Package'){
+          steps{
+              sh "mvn package"
+          }
+      }
+      stage('Nexus Test'){
+              steps{
+              nexusArtifactUploader(
+              nexusVersion: 'nexus3',
+              protocol: 'http',
+              nexusUrl: '100.53.184.93:8081',
+              groupId: 'addressbook',
+              version: '2.0-SNAPSHOT',
+              repository: 'maven-snapshots',
+              credentialsId: 'nexus',
+              artifacts: [
+                  [artifactId: 'superproject',
+                   classifier: '',
+                   file: 'target/addressbook-2.0.war',
+                   type: 'war']
+                  ]
+            )
+         }
+      }
+      stage('Docker Build and Push to ECR') {
+         steps {
+             script {
+                def ecrRepo = "727544051358.dkr.ecr.us-east-1.amazonaws.com/super-project"
+                def imageTag = "${env.BUILD_NUMBER}"
+
+              // Login to ECR using IAM role
+               sh """
+                aws ecr get-login-password --region us-east-1 | \
+                docker login --username AWS --password-stdin ${ecrRepo}
+                """
+
+            // Build and tag image
+               sh "docker build -t super-project:${imageTag} -t super-project:latest ."
+               sh "docker tag super-project:${imageTag} ${ecrRepo}:${imageTag}"
+               sh "docker tag super-project:latest ${ecrRepo}:latest"
+
+            // Push to ECR
+               sh "docker push ${ecrRepo}:${imageTag}"
+               sh "docker push ${ecrRepo}:latest"
+            }
+        }
+    }
+      stage('k8s Deployment'){
+          steps{
+              sh "aws eks update-kubeconfig --region us-east-1 --name super-project"
+              sh "kubectl apply -f Application.yaml"
+          }
+      }
+       }
+      
+     post {
+        success {
+            echo "✅ Pipeline completed successfully"
+        }
+        failure {
+            echo "❌ Pipeline failed"
+        }
+    }
+}
